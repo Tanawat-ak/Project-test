@@ -7,15 +7,38 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from huggingface_hub import InferenceClient
 
-st.set_page_config(page_title="Grant Advisor", layout="centered")
-st.title("🎓 ระบบที่ปรึกษาด้านทุนวิจัย (via HF API)")
+# ==========================================
+# 1. ตั้งค่าหน้าเว็บ Streamlit
+# ==========================================
+st.set_page_config(page_title="MFU Research Grant Advisor", page_icon="🎓", layout="wide")
+st.title("🎓 MFU Research Grant Disbursement Advisor")
 
-# รับ Token และกำหนดโมเดล
-HF_TOKEN = st.sidebar.text_input("ใส่ Hugging Face Token", type="password")
+st.write("ระบบที่ปรึกษาด้านการเบิกจ่ายเงินทุนสนับสนุนการวิจัย มหาวิทยาลัยแม่ฟ้าหลวง")
+
+# ==========================================
+# 2. ส่วน Group No. และรายชื่อสมาชิก (Sidebar)
+# ==========================================
+with st.sidebar:
+    st.markdown("""
+    ### **BDA_Project2_Group9**
+    **รายชื่อสมาชิก:**
+    * 6631501028 - CHAT JAISAN
+    * 6631501041 - TANAKRIT SOMBOON
+    * 6631501047 - TANAWAT KEUNKAEW
+    * 6631501065 - NANTAWUT PANAN  
+    ---
+    """)
+    st.info("ระบบนี้ใช้ข้อมูลจากเอกสารระเบียบการเบิกจ่ายเงินทุนวิจัย มฟล. เพื่อตอบคำถามของคุณ")
+    
+    # เพิ่มช่องรับ Token ไว้ใน Sidebar
+    st.markdown("---")
+    st.markdown("### ⚙️ API Configuration")
+    HF_TOKEN = st.text_input("ใส่ Hugging Face Token", type="password")
+
 MODEL_ID = "Qwen/Qwen2.5-72B-Instruct"
 
 # ==========================================
-# 1. โหลดเอกสารและสร้าง Vector Store (ทำครั้งเดียว)
+# 3. โหลดเอกสารและสร้าง Vector Store
 # ==========================================
 @st.cache_resource(show_spinner="กำลังเตรียมฐานข้อมูลเอกสารอ้างอิง กรุณารอสักครู่...")
 def initialize_vector_store():
@@ -36,28 +59,48 @@ def initialize_vector_store():
     if not documents:
         return None
 
-    # ตัดคำ
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     docs = text_splitter.split_documents(documents)
 
-    # สร้าง Embeddings (ใช้ CPU หรือ GPU อัตโนมัติ)
     embeddings = HuggingFaceEmbeddings(
         model_name="BAAI/bge-m3",
         model_kwargs={'device': 'cuda' if torch.cuda.is_available() else 'cpu'}
     )
     
-    # สร้าง FAISS Vector Store
     vectorstore = FAISS.from_documents(docs, embeddings)
     return vectorstore.as_retriever(search_kwargs={"k": 3})
 
-# โหลดตัวค้นหา
 retriever = initialize_vector_store()
 
 # ==========================================
-# 2. ส่วนของหน้าต่างแชท (Chat Interface)
+# 4. ส่วนคำถามแนะนำ (Suggested Questions)
+# ==========================================
+st.markdown("#### 💡 คำถามแนะนำ")
+cols = st.columns(2)
+suggestions = [
+    "อาจารย์จะตั้งงบวิจัยอย่างไร",
+    "ผู้วิจัยจะได้รับเงินเมื่อไหร่"
+]
+
+# ถ้าผู้ใช้กดปุ่มคำถามแนะนำ ให้เก็บคำถามลง Session State
+for i, suggestion in enumerate(suggestions):
+    if cols[i].button(suggestion, use_container_width=True):
+        st.session_state.suggested_prompt = suggestion
+
+st.markdown("---")
+
+# ==========================================
+# 5. ส่วนของหน้าต่างแชท (Chat Interface)
 # ==========================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+# ดึงค่า prompt (ไม่ว่าจะมาจากการพิมพ์ปกติ หรือการกดปุ่มคำถามแนะนำ)
+user_prompt = st.chat_input("พิมพ์ข้อความสอบถามที่นี่...")
+
+if "suggested_prompt" in st.session_state:
+    user_prompt = st.session_state.suggested_prompt
+    del st.session_state.suggested_prompt # ลบออกหลังจากดึงมาใช้แล้ว
 
 # แสดงประวัติแชท
 for message in st.session_state.messages:
@@ -65,55 +108,44 @@ for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-if prompt := st.chat_input("ตัวอย่างเช่น: อาจารย์จะตั้งงบวิจัยอย่างไร?"):
+# จัดการเมื่อมีคำถามเข้ามา
+if user_prompt:
     if not HF_TOKEN:
         st.error("กรุณาใส่ Hugging Face Token ที่แถบด้านซ้ายก่อนครับ")
     elif not retriever:
         st.error("ระบบไม่พร้อมทำงาน เนื่องจากไม่พบไฟล์ PDF สำหรับอ้างอิง")
     else:
-        # นำคำถามขึ้นจอ
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.messages.append({"role": "user", "content": user_prompt})
         with st.chat_message("user"):
-            st.markdown(prompt)
+            st.markdown(user_prompt)
 
         with st.chat_message("assistant"):
-            with st.spinner("กำลังค้นหาข้อมูลจากระเบียบการ และวิเคราะห์คำตอบ..."):
+            with st.spinner("กำลังวิเคราะห์ระเบียบการ มฟล..."):
                 try:
-                    # 1. ค้นหาเอกสารที่เกี่ยวข้อง (Retrieval)
-                    relevant_docs = retriever.invoke(prompt)
+                    relevant_docs = retriever.invoke(user_prompt)
                     context_text = "\n\n".join([doc.page_content for doc in relevant_docs])
 
-                    # 2. สร้าง System Prompt (รวมบริบทที่ค้นหามาได้)
                     system_prompt = (
-                        "คุณคือแชทบอทที่ปรึกษาด้านการจ่ายเงินทุนสนับสนุนการวิจัยของมหาวิทยาลัย "
+                        "คุณคือแชทบอทที่ปรึกษาด้านการจ่ายเงินทุนสนับสนุนการวิจัยของมหาวิทยาลัยแม่ฟ้าหลวง (MFU) "
                         "จงใช้ข้อมูลจากเอกสารอ้างอิง (Context) ด้านล่างนี้เพื่อตอบคำถามเท่านั้น ห้ามเดาข้อมูลเอง\n\n"
-                        "นี่คือตัวอย่างสไตล์การตอบคำถามที่คุณควรเลียนแบบ (ให้ตอบสั้น กระชับ เป็นข้อๆ):\n"
-                        "คำถาม: อาจารย์จะตั้งงบวิจัยอย่างไร\n"
-                        "คำตอบ: อาจารย์สามารถตั้งงบวิจัยได้ตามค่าใช้จ่ายที่คาดว่าจะเกิดขึ้นจริงในโครงการ โดยอ้างอิงรายการค่าใช้จ่ายตามระเบียบของมหาวิทยาลัย\n\n"
                         "Context:\n"
                         f"{context_text}"
                     )
 
-                    # 3. เตรียมประวัติสนทนาให้ API
                     client = InferenceClient(model=MODEL_ID, token=HF_TOKEN.strip())
                     chat_history = [{"role": "system", "content": system_prompt}]
-                    
-                    # เอาประวัติเก่ามาต่อท้าย (ส่งเฉพาะ user กับ assistant)
                     chat_history.extend([msg for msg in st.session_state.messages if msg["role"] in ["user", "assistant"]])
 
-                    # 4. เรียกใช้งาน Chat API
                     response = client.chat_completion(
                         messages=chat_history,
                         max_tokens=512,
-                        temperature=0.3 # ค่า 0.3 เพื่อให้ตอบอิงตามข้อมูลจริงไม่แต่งเติม
+                        temperature=0.3 
                     )
                     
-                    # ดึงข้อความและแสดงผล
                     output_text = response.choices[0].message.content
                     st.markdown(output_text)
                     st.session_state.messages.append({"role": "assistant", "content": output_text})
                     
                 except Exception as e:
                     st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
-                    # ลบคำถามล่าสุดออกเพื่อให้พิมพ์ถามใหม่ได้
                     st.session_state.messages.pop()
