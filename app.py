@@ -30,10 +30,10 @@ with st.sidebar:
     """)
     st.info("ระบบนี้ใช้ข้อมูลจากเอกสารระเบียบการเบิกจ่ายเงินทุนวิจัย มฟล. เพื่อตอบคำถามของคุณ")
     
-    # เพิ่มช่องรับ Token ไว้ใน Sidebar
-    st.markdown("---")
-    st.markdown("### ⚙️ API Configuration")
-    HF_TOKEN = st.text_input("ใส่ Hugging Face Token", type="password")
+try:
+    HF_TOKEN = st.secrets["HF_TOKEN"]
+except Exception:
+    HF_TOKEN = "" # ถ้าหาใน Secrets ไม่เจอ (เช่น รันบน Local) จะให้เป็นค่าว่าง หรือคุณจะใส่ Token ของคุณตรงนี้ชั่วคราวตอนทดสอบบน Local ก็ได้ครับ
 
 MODEL_ID = "Qwen/Qwen2.5-72B-Instruct"
 
@@ -113,7 +113,7 @@ if user_prompt:
     if not HF_TOKEN:
         st.error("กรุณาใส่ Hugging Face Token ที่แถบด้านซ้ายก่อนครับ")
     elif not retriever:
-        st.error("ระบบไม่พร้อมทำงาน เนื่องจากไม่พบไฟล์ PDF สำหรับอ้างอิง")
+        st.error("ระบบไม่พร้อมทำงาน (ไม่พบ API Token)")
     else:
         st.session_state.messages.append({"role": "user", "content": user_prompt})
         with st.chat_message("user"):
